@@ -5,6 +5,37 @@ app_description = "app for Almarkazia Customization"
 app_email = "mahmudhussain2001ab@gmail.com"
 app_license = "mit"
 
+fixtures = [
+	{
+		"dt": "Custom Field",
+		"filters": [
+			[
+				"name",
+				"in",
+				[
+					"Payment Entry-custom_manual_receipt_no",
+					"Payment Entry-custom_received_from_text",
+					"Payment Entry-custom_payment_for",
+					"Payment Entry-custom_collector",
+					"Payment Entry-custom_amount_in_words_arabic",
+					"Payment Entry-custom_receipt_notes",
+					"Payment Entry-custom_branch",
+					"Payment Entry-custom_collection_items",
+                    "Payment Entry-custom_section_break_y3478",
+				],
+			],
+		],
+	},
+	{
+		"dt": "Report",
+		"filters": [["name", "in", ["Customer Collections by Item"]]],
+	},
+	{
+		"dt": "Print Format",
+		"filters": [["name", "in", ["Customer Collection Receipt"]]],
+	},
+]
+
 # Apps
 # ------------------
 
@@ -43,7 +74,9 @@ app_license = "mit"
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-# doctype_js = {"doctype" : "public/js/doctype.js"}
+doctype_js = {
+	"Payment Entry": "public/js/payment_entry.js",
+}
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -86,7 +119,7 @@ app_license = "mit"
 # ------------
 
 # before_install = "almarkazia_customization.install.before_install"
-# after_install = "almarkazia_customization.install.after_install"
+after_install = "almarkazia_customization.install.after_install"
 
 # Uninstallation
 # ------------
@@ -138,13 +171,11 @@ app_license = "mit"
 # ---------------
 # Hook on document methods and events
 
-# doc_events = {
-# 	"*": {
-# 		"on_update": "method",
-# 		"on_cancel": "method",
-# 		"on_trash": "method"
-# 	}
-# }
+doc_events = {
+	"Payment Entry": {
+		"validate": "almarkazia_customization.payment_entry.validate_customer_collection",
+	},
+}
 
 # Scheduled Tasks
 # ---------------
