@@ -1,212 +1,256 @@
-{% if letter_head and not no_letterhead %}
-<div class="letter-head">{{ letter_head }}</div>
-{% else %}
-<div class="receipt-company">
-	<div class="receipt-company-name">{{ doc.company }}</div>
-	{% set company_tax_id = frappe.db.get_value("Company", doc.company, "tax_id") %}
-	{% if company_tax_id %}
-	<div>الرقم الضريبي: {{ company_tax_id }}</div>
-	{% endif %}
-</div>
-{% endif %}
-
 {% set currency = doc.paid_to_account_currency or doc.company_currency %}
 {% set received_amount = doc.received_amount or doc.paid_amount or doc.base_received_amount or 0 %}
+{% set company_tax_id = frappe.db.get_value("Company", doc.company, "tax_id") %}
 {% set invoice_items = frappe.db.sql("""
-	SELECT
-		si.name AS sales_invoice,
-		sii.idx AS item_row,
-		sii.item_code AS item,
-		sii.item_name,
-		sii.item_group,
-		sii.description,
-		sii.qty,
-		sii.rate,
-		sii.net_amount AS invoice_item_amount,
-		CASE
-			WHEN ABS(COALESCE(invoice_totals.invoice_item_total, 0)) > 0
-			THEN COALESCE(per.allocated_amount, 0) * sii.net_amount / invoice_totals.invoice_item_total
-			ELSE 0
-		END AS collected_amount
-	FROM `tabPayment Entry Reference` per
-	INNER JOIN `tabSales Invoice` si
-		ON si.name = per.reference_name
-		AND si.docstatus = 1
-	INNER JOIN `tabSales Invoice Item` sii
-		ON sii.parent = si.name
-		AND sii.parenttype = 'Sales Invoice'
-	INNER JOIN (
-		SELECT parent, SUM(net_amount) AS invoice_item_total
-		FROM `tabSales Invoice Item`
-		WHERE parenttype = 'Sales Invoice'
-		GROUP BY parent
-	) invoice_totals
-		ON invoice_totals.parent = si.name
-	WHERE per.parent = %(payment_entry)s
-		AND per.parenttype = 'Payment Entry'
-		AND per.reference_doctype = 'Sales Invoice'
-	ORDER BY si.name, sii.idx
+SELECT
+si.name AS sales_invoice,
+sii.idx AS item_row,
+sii.item_code AS item,
+sii.item_name,
+sii.item_group,
+sii.description,
+sii.qty,
+sii.rate,
+sii.net_amount AS invoice_item_amount,
+CASE
+WHEN ABS(COALESCE(invoice_totals.invoice_item_total, 0)) > 0
+THEN COALESCE(per.allocated_amount, 0) * sii.net_amount / invoice_totals.invoice_item_total
+ELSE 0
+END AS collected_amount
+FROM `tabPayment Entry Reference` per
+INNER JOIN `tabSales Invoice` si
+ON si.name = per.reference_name
+AND si.docstatus = 1
+INNER JOIN `tabSales Invoice Item` sii
+ON sii.parent = si.name
+AND sii.parenttype = 'Sales Invoice'
+INNER JOIN (
+SELECT parent, SUM(net_amount) AS invoice_item_total
+FROM `tabSales Invoice Item`
+WHERE parenttype = 'Sales Invoice'
+GROUP BY parent
+) invoice_totals
+ON invoice_totals.parent = si.name
+WHERE per.parent = %(payment_entry)s
+AND per.parenttype = 'Payment Entry'
+AND per.reference_doctype = 'Sales Invoice'
+ORDER BY si.name, sii.idx
 """, {"payment_entry": doc.name}, as_dict=True) %}
 {% set totals = namespace(invoice=0, collected=0) %}
+{% for row in invoice_items %}
+{% set totals.invoice = totals.invoice + (row.invoice_item_amount or 0) %}
+{% set totals.collected = totals.collected + (row.collected_amount or 0) %}
+{% endfor %}
 
 <style>
-	.receipt {
+	@page {
+		size: A4 portrait;
+		margin: 8mm;
+	}
+
+	.print-format {
+		padding: 0 !important;
+	}
+
+	.receipt-sheet {
 		direction: rtl;
 		text-align: right;
 		font-family: "Cairo", "Tajawal", "Arial", sans-serif;
 		color: #111827;
-		font-size: 13px;
-		line-height: 1.6;
+		font-size: 10px;
+		line-height: 1.35;
 	}
+
+	.receipt-copy {
+		min-height: 135mm;
+		padding: 3mm 4mm 5mm;
+		box-sizing: border-box;
+		overflow: hidden;
+		page-break-inside: avoid;
+		break-inside: avoid;
+	}
+
+	.receipt-copy+.receipt-copy {
+		border-top: 1px dashed #9ca3af;
+		padding-top: 5mm;
+	}
+
 	.receipt-company {
 		direction: rtl;
-		text-align: center;
-		margin-bottom: 12px;
+		text-align: right !important;
+		margin-bottom: 5px;
 	}
+
+	.receipt-company,
+	.receipt-company * {
+		text-align: right !important;
+	}
+
 	.receipt-company-name {
-		font-size: 18px;
+		font-size: 14px;
 		font-weight: 700;
 	}
+
 	.receipt-title {
 		text-align: center;
-		font-size: 22px;
+		font-size: 16px;
 		font-weight: 700;
-		margin: 10px 0 16px;
+		margin: 4px 0 8px;
 	}
+
 	.receipt-grid {
 		display: grid;
 		grid-template-columns: 1fr 1fr;
-		gap: 8px 18px;
-		margin-bottom: 14px;
+		gap: 4px 12px;
+		margin-bottom: 7px;
 	}
+
 	.receipt-field {
 		border-bottom: 1px solid #d1d5db;
-		padding: 4px 0;
-		min-height: 28px;
+		padding: 2px 0;
+		min-height: 18px;
 	}
+
 	.receipt-label {
 		display: inline-block;
-		min-width: 105px;
+		min-width: 78px;
 		color: #4b5563;
 		font-weight: 700;
 	}
+
 	.receipt-block {
 		border: 1px solid #d1d5db;
-		padding: 8px 10px;
-		margin-bottom: 12px;
-		min-height: 36px;
+		padding: 4px 6px;
+		margin-bottom: 7px;
+		min-height: 24px;
 	}
+
 	.receipt-table {
 		width: 100%;
 		border-collapse: collapse;
-		margin-top: 8px;
-		margin-bottom: 12px;
+		margin-top: 5px;
+		margin-bottom: 7px;
+		table-layout: fixed;
 	}
+
 	.receipt-table th,
 	.receipt-table td {
 		border: 1px solid #d1d5db;
-		padding: 6px 8px;
+		padding: 3px 4px !important;
 		vertical-align: top;
+		overflow-wrap: anywhere;
 	}
+
 	.receipt-table th {
 		background: #f3f4f6;
 		font-weight: 700;
 	}
+
 	.text-left {
 		text-align: left;
 	}
+
 	.text-center {
 		text-align: center;
 	}
+
 	.signatures {
 		display: grid;
-		grid-template-columns: 1fr 1fr 1fr;
-		gap: 18px;
-		margin-top: 40px;
+		grid-template-columns: 1fr 1fr;
+		gap: 14px;
+		margin-top: 18px;
 		text-align: center;
 	}
+
 	.signature-line {
 		border-top: 1px solid #111827;
-		padding-top: 8px;
+		padding-top: 5px;
 	}
 </style>
 
-<div class="receipt">
-	<div class="receipt-title">إيصال تحصيل عميل</div>
-
-	<div class="receipt-grid">
-		<div class="receipt-field"><span class="receipt-label">رقم الإيصال:</span> {{ doc.name }}</div>
-		<div class="receipt-field"><span class="receipt-label">التاريخ:</span> {{ frappe.utils.format_date(doc.posting_date) }}</div>
-		<div class="receipt-field"><span class="receipt-label">العميل:</span> {{ doc.party_name or doc.party }}</div>
-		<div class="receipt-field"><span class="receipt-label">استلمنا من:</span> {{ doc.party_name or doc.party }}</div>
-		<div class="receipt-field"><span class="receipt-label">المبلغ:</span> {{ format_egyptian_money(received_amount) }}</div>
-		<div class="receipt-field"><span class="receipt-label">طريقة السداد:</span> {{ doc.mode_of_payment or "" }}</div>
-		<div class="receipt-field"><span class="receipt-label">الخزنة / الحساب:</span> {{ doc.paid_to or "" }}</div>
-		<div class="receipt-field"><span class="receipt-label">المستلم:</span> {{ frappe.session.user }}</div>
-		<div class="receipt-field"><span class="receipt-label">رقم المرجع:</span> {{ doc.reference_no or "" }}</div>
-		<div class="receipt-field"><span class="receipt-label">تاريخ المرجع:</span> {{ frappe.utils.format_date(doc.reference_date) if doc.reference_date else "" }}</div>
-	</div>
-
-	<div class="receipt-block">
-		<span class="receipt-label">المبلغ كتابة:</span>
-		{{ egyptian_money_in_words(received_amount) }}
-	</div>
-
-	<table class="receipt-table">
-		<thead>
-			<tr>
-				<th style="width: 40px;">م</th>
-				<th>فاتورة المبيعات</th>
-				<th>البند</th>
-				<th>مجموعة البند</th>
-				<th>الوصف</th>
-				<th class="text-left">الكمية</th>
-				<th class="text-left">السعر</th>
-				<th class="text-left">قيمة الفاتورة</th>
-				<th class="text-left">المبلغ المحصل</th>
-			</tr>
-		</thead>
-		<tbody>
-			{% for row in invoice_items %}
-			{% set totals.invoice = totals.invoice + (row.invoice_item_amount or 0) %}
-			{% set totals.collected = totals.collected + (row.collected_amount or 0) %}
-			<tr>
-				<td class="text-center">{{ loop.index }}</td>
-				<td>{{ row.sales_invoice }}</td>
-				<td>{{ row.item_name or row.item }}</td>
-				<td>{{ row.item_group or "" }}</td>
-				<td>{{ row.description or "" }}</td>
-				<td class="text-left">{{ frappe.format(row.qty, {"fieldtype": "Float"}) }}</td>
-				<td class="text-left">{{ format_egyptian_money(row.rate or 0) }}</td>
-				<td class="text-left">{{ format_egyptian_money(row.invoice_item_amount or 0) }}</td>
-				<td class="text-left">{{ format_egyptian_money(row.collected_amount or 0) }}</td>
-			</tr>
-			{% endfor %}
-			{% if not invoice_items %}
-			<tr>
-				<td colspan="9" class="text-center">لا توجد فواتير مبيعات مرتبطة بهذا القيد.</td>
-			</tr>
+<div class="receipt-sheet">
+	{% for receipt_copy in [1, 2] %}
+	<div class="receipt-copy">
+		{% if letter_head and not no_letterhead %}
+		<div class="receipt-company receipt-letter-head">{{ letter_head }}</div>
+		{% else %}
+		<div class="receipt-company">
+			<div class="receipt-company-name">{{ doc.company }}</div>
+			{% if company_tax_id %}
+			<div>الرقم الضريبي: {{ company_tax_id }}</div>
 			{% endif %}
-		</tbody>
-		<tfoot>
-			<tr>
-				<th colspan="7" class="text-left">الإجمالي</th>
-				<th class="text-left">{{ format_egyptian_money(totals.invoice) }}</th>
-				<th class="text-left">{{ format_egyptian_money(totals.collected) }}</th>
-			</tr>
-		</tfoot>
-	</table>
+		</div>
+		{% endif %}
 
-	{% if doc.remarks %}
-	<div class="receipt-block">
-		<span class="receipt-label">ملاحظات:</span>
-		{{ doc.remarks }}
-	</div>
-	{% endif %}
+		<div class="receipt-title">إيصال إستلام نقدية</div>
 
-	<div class="signatures">
-		<div class="signature-line">توقيع العميل</div>
-		<div class="signature-line">توقيع المستلم</div>
-		<div class="signature-line">توقيع المحاسب</div>
+		<div class="receipt-grid">
+			<div class="receipt-field"><span class="receipt-label">رقم الإيصال:</span> {{ doc.name }}</div>
+			<div class="receipt-field"><span class="receipt-label">التاريخ:</span> {{
+				frappe.utils.format_date(doc.posting_date) }}</div>
+			<div class="receipt-field"><span class="receipt-label">العميل:</span> {{ doc.party_name or doc.party }}
+			</div>
+			<div class="receipt-field"><span class="receipt-label">استلمنا من:</span> {{ doc.party_name or doc.party }}
+			</div>
+			<div class="receipt-field"><span class="receipt-label">المبلغ:</span> {{
+				format_egyptian_money(received_amount) }}</div>
+			<div class="receipt-field"><span class="receipt-label">طريقة السداد:</span> {{ doc.mode_of_payment or "" }}
+			</div>
+			<div class="receipt-field"><span class="receipt-label">الخزنة / الحساب:</span> {{ doc.paid_to or "" }}</div>
+			<div class="receipt-field"><span class="receipt-label">المستلم:</span> {{ frappe.session.user }}</div>
+			<div class="receipt-field"><span class="receipt-label">رقم المرجع:</span> {{ doc.reference_no or "" }}</div>
+			<div class="receipt-field"><span class="receipt-label">تاريخ المرجع:</span> {{
+				frappe.utils.format_date(doc.reference_date) if doc.reference_date else "" }}</div>
+		</div>
+
+		<div class="receipt-block">
+			<span class="receipt-label">المبلغ كتابة:</span>
+			{{ egyptian_money_in_words(received_amount) }}
+		</div>
+
+		<table class="receipt-table">
+			<thead>
+				<tr>
+					<th style="width: 28px;">م</th>
+					<th>فاتورة المبيعات</th>
+					<th>البند</th>
+					<th class="text-left">المبلغ المحصل</th>
+				</tr>
+			</thead>
+			<tbody>
+				{% for row in invoice_items %}
+				<tr>
+					<td class="text-center">{{ loop.index }}</td>
+					<td>{{ row.sales_invoice }}</td>
+					<td>{{ row.item_name or row.item }}</td>
+					<td class="text-left">{{ format_egyptian_money(row.collected_amount or 0) }}</td>
+				</tr>
+				{% endfor %}
+				{% if not invoice_items %}
+				<tr>
+					<td colspan="4" class="text-center">لا توجد فواتير مبيعات مرتبطة بهذا القيد.</td>
+				</tr>
+				{% endif %}
+			</tbody>
+			<tfoot>
+				<tr>
+					<th colspan="3" class="text-left">الإجمالي</th>
+					<th class="text-left">{{ format_egyptian_money(totals.collected) }}</th>
+				</tr>
+			</tfoot>
+		</table>
+
+		{% if doc.remarks %}
+		<div class="receipt-block">
+			<span class="receipt-label">ملاحظات:</span>
+			{{ doc.remarks }}
+		</div>
+		{% endif %}
+
+		<div class="signatures">
+			<div class="signature-line">توقيع العميل</div>
+			<div class="signature-line">توقيع المستلم</div>
+		</div>
 	</div>
+	{% endfor %}
 </div>
