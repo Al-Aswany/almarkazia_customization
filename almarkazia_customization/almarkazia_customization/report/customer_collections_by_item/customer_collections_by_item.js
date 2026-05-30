@@ -70,7 +70,5 @@ frappe.query_reports["Customer Collections by Item"] = {
 				};
 			},
 		},
-		{ fieldname: "collector", label: __("Collector"), fieldtype: "Link", options: "User" },
-		{ fieldname: "branch", label: __("Branch"), fieldtype: "Link", options: "Branch" },
 	],
 };

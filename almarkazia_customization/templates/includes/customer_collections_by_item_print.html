@@ -191,10 +191,7 @@
 
 	<section class="filters">
 		{% for row in filter_rows %}
-		{% if row.label in ("Company", "From Date", "To Date", "View Type", "Customer", "Item", "Item Group", "Mode of
-		Payment", "Treasury Account", "Collector", "Branch") %}
 		<div class="filter"><b>{{ row.label }}:</b>{{ row.value }}</div>
-		{% endif %}
 		{% endfor %}
 	</section>
 
@@ -244,7 +241,7 @@
 			<tr>
 				<td>{{ row.serial }}</td>
 				<td>{{ row.posting_date }}</td>
-				<td>{{ row.manual_receipt_no or row.payment_entry }}</td>
+				<td>{{ row.payment_entry }}</td>
 				<td class="name-cell">{{ row.customer }}</td>
 				{% if amount_columns %}
 				{% for column in amount_columns %}<td class="amount-cell">{{ format_amount(row.amount_cells[column.key])

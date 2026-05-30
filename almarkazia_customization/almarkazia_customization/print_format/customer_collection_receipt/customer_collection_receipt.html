@@ -10,9 +10,43 @@
 </div>
 {% endif %}
 
-{% set receipt_no = doc.custom_manual_receipt_no or doc.name %}
-{% set collection_items = doc.custom_collection_items or [] %}
-{% set collection_total = collection_items | sum(attribute="amount") %}
+{% set currency = doc.paid_to_account_currency or doc.company_currency %}
+{% set invoice_items = frappe.db.sql("""
+	SELECT
+		si.name AS sales_invoice,
+		sii.idx AS item_row,
+		sii.item_code AS item,
+		sii.item_name,
+		sii.item_group,
+		sii.description,
+		sii.qty,
+		sii.rate,
+		sii.net_amount AS invoice_item_amount,
+		CASE
+			WHEN ABS(COALESCE(invoice_totals.invoice_item_total, 0)) > 0
+			THEN COALESCE(per.allocated_amount, 0) * sii.net_amount / invoice_totals.invoice_item_total
+			ELSE 0
+		END AS collected_amount
+	FROM `tabPayment Entry Reference` per
+	INNER JOIN `tabSales Invoice` si
+		ON si.name = per.reference_name
+		AND si.docstatus = 1
+	INNER JOIN `tabSales Invoice Item` sii
+		ON sii.parent = si.name
+		AND sii.parenttype = 'Sales Invoice'
+	INNER JOIN (
+		SELECT parent, SUM(net_amount) AS invoice_item_total
+		FROM `tabSales Invoice Item`
+		WHERE parenttype = 'Sales Invoice'
+		GROUP BY parent
+	) invoice_totals
+		ON invoice_totals.parent = si.name
+	WHERE per.parent = %(payment_entry)s
+		AND per.parenttype = 'Payment Entry'
+		AND per.reference_doctype = 'Sales Invoice'
+	ORDER BY si.name, sii.idx
+""", {"payment_entry": doc.name}, as_dict=True) %}
+{% set totals = namespace(invoice=0, collected=0) %}
 
 <style>
 	.receipt {
@@ -100,65 +134,72 @@
 	<div class="receipt-title">إيصال تحصيل عميل</div>
 
 	<div class="receipt-grid">
-		<div class="receipt-field"><span class="receipt-label">رقم الإيصال:</span> {{ receipt_no }}</div>
+		<div class="receipt-field"><span class="receipt-label">رقم الإيصال:</span> {{ doc.name }}</div>
 		<div class="receipt-field"><span class="receipt-label">التاريخ:</span> {{ frappe.utils.format_date(doc.posting_date) }}</div>
 		<div class="receipt-field"><span class="receipt-label">العميل:</span> {{ doc.party_name or doc.party }}</div>
-		<div class="receipt-field"><span class="receipt-label">استلمنا من:</span> {{ doc.custom_received_from_text or doc.party_name or doc.party }}</div>
+		<div class="receipt-field"><span class="receipt-label">استلمنا من:</span> {{ doc.party_name or doc.party }}</div>
 		<div class="receipt-field"><span class="receipt-label">المبلغ:</span> {{ doc.get_formatted("received_amount", doc) }}</div>
 		<div class="receipt-field"><span class="receipt-label">طريقة السداد:</span> {{ doc.mode_of_payment or "" }}</div>
 		<div class="receipt-field"><span class="receipt-label">الخزنة / الحساب:</span> {{ doc.paid_to or "" }}</div>
-		<div class="receipt-field"><span class="receipt-label">المستلم:</span> {{ doc.custom_collector or frappe.session.user }}</div>
+		<div class="receipt-field"><span class="receipt-label">المستلم:</span> {{ frappe.session.user }}</div>
 		<div class="receipt-field"><span class="receipt-label">رقم المرجع:</span> {{ doc.reference_no or "" }}</div>
 		<div class="receipt-field"><span class="receipt-label">تاريخ المرجع:</span> {{ frappe.utils.format_date(doc.reference_date) if doc.reference_date else "" }}</div>
 	</div>
 
 	<div class="receipt-block">
 		<span class="receipt-label">المبلغ كتابة:</span>
-		{{ doc.custom_amount_in_words_arabic or doc.in_words or "" }}
+		{{ doc.in_words or "" }}
 	</div>
-
-	{% if doc.custom_payment_for %}
-	<div class="receipt-block"><span class="receipt-label">وذلك مقابل:</span> {{ doc.custom_payment_for }}</div>
-	{% endif %}
 
 	<table class="receipt-table">
 		<thead>
 			<tr>
 				<th style="width: 40px;">#</th>
+				<th>فاتورة المبيعات</th>
 				<th>البند</th>
 				<th>مجموعة البند</th>
 				<th>الوصف</th>
-				<th class="text-left">المبلغ</th>
-				<th>ملاحظات</th>
+				<th class="text-left">الكمية</th>
+				<th class="text-left">السعر</th>
+				<th class="text-left">قيمة الفاتورة</th>
+				<th class="text-left">المبلغ المحصل</th>
 			</tr>
 		</thead>
 		<tbody>
-			{% for row in collection_items %}
+			{% for row in invoice_items %}
+			{% set totals.invoice = totals.invoice + (row.invoice_item_amount or 0) %}
+			{% set totals.collected = totals.collected + (row.collected_amount or 0) %}
 			<tr>
 				<td class="text-center">{{ loop.index }}</td>
+				<td>{{ row.sales_invoice }}</td>
 				<td>{{ row.item_name or row.item }}</td>
 				<td>{{ row.item_group or "" }}</td>
 				<td>{{ row.description or "" }}</td>
-				<td class="text-left">{{ row.get_formatted("amount", doc) }}</td>
-				<td>{{ row.notes or "" }}</td>
+				<td class="text-left">{{ frappe.format(row.qty, {"fieldtype": "Float"}) }}</td>
+				<td class="text-left">{{ frappe.utils.fmt_money(row.rate or 0, currency=currency) }}</td>
+				<td class="text-left">{{ frappe.utils.fmt_money(row.invoice_item_amount or 0, currency=currency) }}</td>
+				<td class="text-left">{{ frappe.utils.fmt_money(row.collected_amount or 0, currency=currency) }}</td>
 			</tr>
 			{% endfor %}
+			{% if not invoice_items %}
+			<tr>
+				<td colspan="9" class="text-center">لا توجد فواتير مبيعات مرتبطة بهذا القيد.</td>
+			</tr>
+			{% endif %}
 		</tbody>
 		<tfoot>
 			<tr>
-				<th colspan="4" class="text-left">الإجمالي</th>
-				<th class="text-left">{{ frappe.utils.fmt_money(collection_total, currency=doc.paid_to_account_currency or doc.company_currency) }}</th>
-				<th></th>
+				<th colspan="7" class="text-left">الإجمالي</th>
+				<th class="text-left">{{ frappe.utils.fmt_money(totals.invoice, currency=currency) }}</th>
+				<th class="text-left">{{ frappe.utils.fmt_money(totals.collected, currency=currency) }}</th>
 			</tr>
 		</tfoot>
 	</table>
 
-	{% if doc.custom_receipt_notes or doc.remarks %}
+	{% if doc.remarks %}
 	<div class="receipt-block">
 		<span class="receipt-label">ملاحظات:</span>
-		{{ doc.custom_receipt_notes or "" }}
-		{% if doc.custom_receipt_notes and doc.remarks %}<br>{% endif %}
-		{{ doc.remarks or "" }}
+		{{ doc.remarks }}
 	</div>
 	{% endif %}
 

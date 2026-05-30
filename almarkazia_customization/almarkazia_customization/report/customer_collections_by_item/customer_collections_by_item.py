@@ -43,7 +43,7 @@ def get_columns(view_type):
 				"width": 180,
 			},
 			{"fieldname": "entry_count", "label": _("Payment Entries"), "fieldtype": "Int", "width": 130},
-			{"fieldname": "amount", "label": _("Amount"), "fieldtype": "Currency", "width": 140},
+			{"fieldname": "amount", "label": _("Collected Amount"), "fieldtype": "Currency", "width": 150},
 		]
 
 	return [
@@ -57,6 +57,13 @@ def get_columns(view_type):
 		{"fieldname": "posting_date", "label": _("Date"), "fieldtype": "Date", "width": 110},
 		{"fieldname": "customer", "label": _("Customer"), "fieldtype": "Link", "options": "Customer", "width": 180},
 		{"fieldname": "customer_name", "label": _("Customer Name"), "fieldtype": "Data", "width": 200},
+		{
+			"fieldname": "sales_invoice",
+			"label": _("Sales Invoice"),
+			"fieldtype": "Link",
+			"options": "Sales Invoice",
+			"width": 180,
+		},
 		{"fieldname": "item", "label": _("Item"), "fieldtype": "Link", "options": "Item", "width": 160},
 		{"fieldname": "item_name", "label": _("Item Name"), "fieldtype": "Data", "width": 200},
 		{
@@ -67,7 +74,10 @@ def get_columns(view_type):
 			"width": 160,
 		},
 		{"fieldname": "description", "label": _("Description"), "fieldtype": "Small Text", "width": 220},
-		{"fieldname": "amount", "label": _("Amount"), "fieldtype": "Currency", "width": 130},
+		{"fieldname": "qty", "label": _("Qty"), "fieldtype": "Float", "width": 90},
+		{"fieldname": "rate", "label": _("Rate"), "fieldtype": "Currency", "width": 120},
+		{"fieldname": "invoice_item_amount", "label": _("Invoice Item Amount"), "fieldtype": "Currency", "width": 150},
+		{"fieldname": "amount", "label": _("Collected Amount"), "fieldtype": "Currency", "width": 150},
 		{
 			"fieldname": "mode_of_payment",
 			"label": _("Mode of Payment"),
@@ -82,8 +92,6 @@ def get_columns(view_type):
 			"options": "Account",
 			"width": 190,
 		},
-		{"fieldname": "collector", "label": _("Collector"), "fieldtype": "Link", "options": "User", "width": 160},
-		{"fieldname": "branch", "label": _("Branch"), "fieldtype": "Link", "options": "Branch", "width": 140},
 		{"fieldname": "reference_no", "label": _("Reference No"), "fieldtype": "Data", "width": 140},
 		{"fieldname": "reference_date", "label": _("Reference Date"), "fieldtype": "Date", "width": 120},
 		{"fieldname": "notes", "label": _("Notes"), "fieldtype": "Small Text", "width": 200},
@@ -96,39 +104,70 @@ def get_data(filters):
 	return get_detailed_data(filters)
 
 
+def get_allocated_item_amount_expression():
+	return """
+		CASE
+			WHEN ABS(COALESCE(invoice_totals.invoice_item_total, 0)) > 0
+			THEN COALESCE(per.allocated_amount, 0) * sii.net_amount / invoice_totals.invoice_item_total
+			ELSE 0
+		END
+	"""
+
+
+def get_invoice_joins():
+	return """
+		INNER JOIN `tabPayment Entry Reference` per
+			ON per.parent = pe.name
+			AND per.parenttype = 'Payment Entry'
+			AND per.reference_doctype = 'Sales Invoice'
+		INNER JOIN `tabSales Invoice` si
+			ON si.name = per.reference_name
+			AND si.docstatus = 1
+		INNER JOIN `tabSales Invoice Item` sii
+			ON sii.parent = si.name
+			AND sii.parenttype = 'Sales Invoice'
+		INNER JOIN (
+			SELECT parent, SUM(net_amount) AS invoice_item_total
+			FROM `tabSales Invoice Item`
+			WHERE parenttype = 'Sales Invoice'
+			GROUP BY parent
+		) invoice_totals
+			ON invoice_totals.parent = si.name
+	"""
+
+
 def get_detailed_data(filters):
 	conditions, params = get_conditions(filters)
 	return frappe.db.sql(
 		f"""
 		SELECT
-			ci.idx AS item_row,
+			sii.idx AS item_row,
 			pe.name AS payment_entry,
 			pe.posting_date,
-			pe.custom_manual_receipt_no AS manual_receipt_no,
 			pe.party AS customer,
-			pe.party_name AS customer_name,
-			pe.custom_received_from_text AS received_from_text,
-			ci.item,
-			ci.item_name,
-			ci.item_group,
-			ci.description,
-			pe.custom_payment_for AS payment_for,
-			ci.amount,
+			COALESCE(c.customer_name, pe.party_name, si.customer_name) AS customer_name,
+			si.name AS sales_invoice,
+			sii.item_code AS item,
+			sii.item_name,
+			sii.item_group,
+			sii.description,
+			sii.qty,
+			sii.rate,
+			sii.net_amount AS invoice_item_amount,
+			per.allocated_amount AS invoice_allocated_amount,
+			{get_allocated_item_amount_expression()} AS amount,
 			pe.mode_of_payment,
 			pe.paid_to AS treasury_account,
-			pe.custom_collector AS collector,
-			pe.custom_branch AS branch,
 			pe.reference_no,
 			pe.reference_date,
-			ci.notes,
+			pe.remarks AS notes,
 			pe.remarks
 		FROM `tabPayment Entry` pe
-		INNER JOIN `tabPayment Entry Collection Item` ci
-			ON ci.parent = pe.name
-			AND ci.parenttype = 'Payment Entry'
-			AND ci.parentfield = 'custom_collection_items'
+		{get_invoice_joins()}
+		LEFT JOIN `tabCustomer` c
+			ON c.name = pe.party
 		WHERE {conditions}
-		ORDER BY pe.posting_date, pe.name, ci.idx
+		ORDER BY pe.posting_date, pe.name, si.name, sii.idx
 		""",
 		params,
 		as_dict=True,
@@ -140,19 +179,16 @@ def get_summary_data(filters):
 	return frappe.db.sql(
 		f"""
 		SELECT
-			ci.item,
-			MAX(ci.item_name) AS item_name,
-			MAX(ci.item_group) AS item_group,
+			sii.item_code AS item,
+			MAX(sii.item_name) AS item_name,
+			MAX(sii.item_group) AS item_group,
 			COUNT(DISTINCT pe.name) AS entry_count,
-			SUM(ci.amount) AS amount
+			SUM({get_allocated_item_amount_expression()}) AS amount
 		FROM `tabPayment Entry` pe
-		INNER JOIN `tabPayment Entry Collection Item` ci
-			ON ci.parent = pe.name
-			AND ci.parenttype = 'Payment Entry'
-			AND ci.parentfield = 'custom_collection_items'
+		{get_invoice_joins()}
 		WHERE {conditions}
-		GROUP BY ci.item
-		ORDER BY amount DESC, ci.item
+		GROUP BY sii.item_code
+		ORDER BY amount DESC, sii.item_code
 		""",
 		params,
 		as_dict=True,
@@ -168,9 +204,6 @@ def get_conditions(filters):
 		"pe.posting_date BETWEEN %(from_date)s AND %(to_date)s",
 	]
 
-	if frappe.db.has_column("Payment Entry", "custom_is_collection_receipt"):
-		conditions.append("pe.custom_is_collection_receipt = 1")
-
 	params = {
 		"company": filters.company,
 		"from_date": filters.from_date,
@@ -179,12 +212,10 @@ def get_conditions(filters):
 
 	optional_filters = {
 		"customer": ("pe.party", filters.get("customer")),
-		"item": ("ci.item", filters.get("item")),
-		"item_group": ("ci.item_group", filters.get("item_group")),
+		"item": ("sii.item_code", filters.get("item")),
+		"item_group": ("sii.item_group", filters.get("item_group")),
 		"mode_of_payment": ("pe.mode_of_payment", filters.get("mode_of_payment")),
 		"treasury_account": ("pe.paid_to", filters.get("treasury_account")),
-		"collector": ("pe.custom_collector", filters.get("collector")),
-		"branch": ("pe.custom_branch", filters.get("branch")),
 	}
 
 	for param, (column, value) in optional_filters.items():
@@ -210,12 +241,9 @@ def get_total(filters):
 	conditions, params = get_conditions(filters)
 	result = frappe.db.sql(
 		f"""
-		SELECT SUM(ci.amount)
+		SELECT SUM({get_allocated_item_amount_expression()})
 		FROM `tabPayment Entry` pe
-		INNER JOIN `tabPayment Entry Collection Item` ci
-			ON ci.parent = pe.name
-			AND ci.parenttype = 'Payment Entry'
-			AND ci.parentfield = 'custom_collection_items'
+		{get_invoice_joins()}
 		WHERE {conditions}
 		""",
 		params,
@@ -248,13 +276,10 @@ def get_breakdown_rows(filters):
 		SELECT
 			COALESCE(pe.mode_of_payment, '') AS mode_of_payment,
 			COALESCE(pe.paid_to, '') AS treasury_account,
-			COALESCE(ci.item_name, ci.item, '') AS item,
-			ci.amount
+			COALESCE(sii.item_name, sii.item_code, '') AS item,
+			{get_allocated_item_amount_expression()} AS amount
 		FROM `tabPayment Entry` pe
-		INNER JOIN `tabPayment Entry Collection Item` ci
-			ON ci.parent = pe.name
-			AND ci.parenttype = 'Payment Entry'
-			AND ci.parentfield = 'custom_collection_items'
+		{get_invoice_joins()}
 		WHERE {conditions}
 		""",
 		params,
@@ -278,7 +303,6 @@ def render_breakdown(title, rows, fieldname):
 			<tbody>{lines}</tbody>
 		</table>
 	"""
-
 
 
 @frappe.whitelist()
@@ -361,17 +385,13 @@ def get_detailed_print_rows(rows, amount_columns):
 				{
 					"posting_date": format_date(row.posting_date),
 					"payment_entry": row.payment_entry,
-					"manual_receipt_no": row.manual_receipt_no or "",
 					"customer": row.customer_name or row.customer or "",
-					"received_from_text": row.received_from_text or "",
 					"description_parts": [],
-					"payment_for": row.payment_for or "",
 					"mode_of_payment": row.mode_of_payment or "",
 					"treasury_account": row.treasury_account or "",
 					"amount_cells": {column.key: 0 for column in amount_columns},
 					"amount": 0,
-					"collector": row.collector or "",
-					"remarks": row.notes or row.remarks or "",
+					"remarks": row.remarks or "",
 				}
 			),
 		)
@@ -387,7 +407,7 @@ def get_detailed_print_rows(rows, amount_columns):
 
 	for index, entry in enumerate(entries.values(), start=1):
 		entry.serial = index
-		entry.description = entry.payment_for or " / ".join(entry.description_parts)
+		entry.description = " / ".join(entry.description_parts)
 		print_rows.append(entry)
 
 	return print_rows
@@ -456,8 +476,6 @@ def get_print_filter_rows(filters):
 		"item_group": _("Item Group"),
 		"mode_of_payment": _("Mode of Payment"),
 		"treasury_account": _("Treasury Account"),
-		"collector": _("Collector"),
-		"branch": _("Branch"),
 	}
 	rows = []
 	for fieldname, label in filter_labels.items():
