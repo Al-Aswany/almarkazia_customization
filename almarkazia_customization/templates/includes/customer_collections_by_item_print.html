@@ -144,6 +144,14 @@
 			font-size: 12px;
 		}
 
+		.amount-words {
+			border: 1px solid #111;
+			padding: 6px 8px;
+			margin-top: 8px;
+			font-size: 10px;
+			font-weight: 700;
+		}
+
 		.signatures {
 			display: grid;
 			grid-template-columns: repeat(3, 1fr);
@@ -172,7 +180,7 @@
 </head>
 
 <body>
-	<div class="print-actions"><button onclick="window.print()">Print</button></div>
+	<div class="print-actions"><button onclick="window.print()">طباعة</button></div>
 
 	<header class="header">
 		<div class="box">
@@ -270,6 +278,8 @@
 	<div class="empty-state">لا توجد بيانات للطباعة حسب الفلاتر المحددة.</div>
 	{% endif %}
 	{% endif %}
+
+	<div class="amount-words"><b>إجمالي المبلغ كتابة:</b> {{ total_in_words }}</div>
 
 	<footer class="signatures">
 		<div class="signature">المحصل</div>

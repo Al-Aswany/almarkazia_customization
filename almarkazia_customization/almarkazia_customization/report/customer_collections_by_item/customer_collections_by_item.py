@@ -4,7 +4,9 @@ import json
 import frappe
 from frappe import _
 from frappe.desk.query_report import get_report_doc
-from frappe.utils import flt, fmt_money, format_date, now_datetime
+from frappe.utils import flt, format_date, now_datetime
+
+from almarkazia_customization.utils import egyptian_money_in_words, format_egyptian_money
 
 
 def execute(filters=None):
@@ -19,82 +21,88 @@ def execute(filters=None):
 
 
 def validate_filters(filters):
+	required_labels = {
+		"company": _("الشركة"),
+		"from_date": _("من تاريخ"),
+		"to_date": _("إلى تاريخ"),
+		"view_type": _("نوع العرض"),
+	}
 	for fieldname in ("company", "from_date", "to_date", "view_type"):
 		if not filters.get(fieldname):
-			frappe.throw(_("Filter {0} is required").format(frappe.bold(_(fieldname.replace("_", " ").title()))))
+			frappe.throw(_("الفلتر {0} مطلوب").format(frappe.bold(required_labels[fieldname])))
 
 	if filters.from_date > filters.to_date:
-		frappe.throw(_("From Date cannot be after To Date"))
+		frappe.throw(_("لا يمكن أن يكون تاريخ البداية بعد تاريخ النهاية"))
 
 	if filters.view_type not in ("Detailed View", "Summary View"):
-		frappe.throw(_("Invalid View Type"))
+		frappe.throw(_("نوع العرض غير صحيح"))
 
 
 def get_columns(view_type):
 	if view_type == "Summary View":
 		return [
-			{"fieldname": "item", "label": _("Item"), "fieldtype": "Link", "options": "Item", "width": 180},
-			{"fieldname": "item_name", "label": _("Item Name"), "fieldtype": "Data", "width": 220},
+			{"fieldname": "item", "label": _("الصنف"), "fieldtype": "Link", "options": "Item", "width": 180},
+			{"fieldname": "item_name", "label": _("اسم الصنف"), "fieldtype": "Data", "width": 220},
 			{
 				"fieldname": "item_group",
-				"label": _("Item Group"),
+				"label": _("مجموعة الصنف"),
 				"fieldtype": "Link",
 				"options": "Item Group",
 				"width": 180,
 			},
-			{"fieldname": "entry_count", "label": _("Payment Entries"), "fieldtype": "Int", "width": 130},
-			{"fieldname": "amount", "label": _("Collected Amount"), "fieldtype": "Currency", "width": 150},
+			{"fieldname": "entry_count", "label": _("عدد الإيصالات"), "fieldtype": "Int", "width": 130},
+			{"fieldname": "amount", "label": _("المبلغ المحصل"), "fieldtype": "Currency", "width": 150},
 		]
 
 	return [
 		{
 			"fieldname": "payment_entry",
-			"label": _("Payment Entry"),
+			"label": _("رقم الإيصال"),
 			"fieldtype": "Link",
 			"options": "Payment Entry",
 			"width": 180,
 		},
-		{"fieldname": "posting_date", "label": _("Date"), "fieldtype": "Date", "width": 110},
-		{"fieldname": "customer", "label": _("Customer"), "fieldtype": "Link", "options": "Customer", "width": 180},
-		{"fieldname": "customer_name", "label": _("Customer Name"), "fieldtype": "Data", "width": 200},
+		{"fieldname": "posting_date", "label": _("التاريخ"), "fieldtype": "Date", "width": 110},
+		{"fieldname": "customer", "label": _("العميل"), "fieldtype": "Link", "options": "Customer", "width": 180},
+		{"fieldname": "customer_name", "label": _("اسم العميل"), "fieldtype": "Data", "width": 200},
 		{
 			"fieldname": "sales_invoice",
-			"label": _("Sales Invoice"),
+			"label": _("فاتورة المبيعات"),
 			"fieldtype": "Link",
 			"options": "Sales Invoice",
 			"width": 180,
 		},
-		{"fieldname": "item", "label": _("Item"), "fieldtype": "Link", "options": "Item", "width": 160},
-		{"fieldname": "item_name", "label": _("Item Name"), "fieldtype": "Data", "width": 200},
+		{"fieldname": "item", "label": _("الصنف"), "fieldtype": "Link", "options": "Item", "width": 160},
+		{"fieldname": "item_name", "label": _("اسم الصنف"), "fieldtype": "Data", "width": 200},
 		{
 			"fieldname": "item_group",
-			"label": _("Item Group"),
+			"label": _("مجموعة الصنف"),
 			"fieldtype": "Link",
 			"options": "Item Group",
 			"width": 160,
 		},
-		{"fieldname": "description", "label": _("Description"), "fieldtype": "Small Text", "width": 220},
-		{"fieldname": "qty", "label": _("Qty"), "fieldtype": "Float", "width": 90},
-		{"fieldname": "rate", "label": _("Rate"), "fieldtype": "Currency", "width": 120},
-		{"fieldname": "invoice_item_amount", "label": _("Invoice Item Amount"), "fieldtype": "Currency", "width": 150},
-		{"fieldname": "amount", "label": _("Collected Amount"), "fieldtype": "Currency", "width": 150},
+		{"fieldname": "description", "label": _("البيان"), "fieldtype": "Small Text", "width": 220},
+		{"fieldname": "qty", "label": _("الكمية"), "fieldtype": "Float", "width": 90},
+		{"fieldname": "rate", "label": _("السعر"), "fieldtype": "Currency", "width": 120},
+		{"fieldname": "invoice_item_amount", "label": _("قيمة بند الفاتورة"), "fieldtype": "Currency", "width": 150},
+		{"fieldname": "amount", "label": _("المبلغ المحصل"), "fieldtype": "Currency", "width": 150},
 		{
 			"fieldname": "mode_of_payment",
-			"label": _("Mode of Payment"),
+			"label": _("طريقة السداد"),
 			"fieldtype": "Link",
 			"options": "Mode of Payment",
 			"width": 150,
 		},
 		{
 			"fieldname": "treasury_account",
-			"label": _("Treasury Account"),
+			"label": _("الخزنة / الحساب"),
 			"fieldtype": "Link",
 			"options": "Account",
 			"width": 190,
 		},
-		{"fieldname": "reference_no", "label": _("Reference No"), "fieldtype": "Data", "width": 140},
-		{"fieldname": "reference_date", "label": _("Reference Date"), "fieldtype": "Date", "width": 120},
-		{"fieldname": "notes", "label": _("Notes"), "fieldtype": "Small Text", "width": 200},
+		{"fieldname": "reference_no", "label": _("رقم المرجع"), "fieldtype": "Data", "width": 140},
+		{"fieldname": "reference_date", "label": _("تاريخ المرجع"), "fieldtype": "Date", "width": 120},
+		{"fieldname": "notes", "label": _("ملاحظات"), "fieldtype": "Small Text", "width": 200},
 	]
 
 
@@ -229,7 +237,7 @@ def get_conditions(filters):
 def get_report_summary(filters):
 	return [
 		{
-			"label": _("Total Received"),
+			"label": _("إجمالي المحصل"),
 			"value": get_total(filters),
 			"indicator": "Green",
 			"datatype": "Currency",
@@ -263,9 +271,9 @@ def get_message(filters):
 			<div class="col-md-4">{item}</div>
 		</div>
 	""".format(
-		mode_of_payment=render_breakdown(_("By Mode of Payment"), rows, "mode_of_payment"),
-		treasury_account=render_breakdown(_("By Treasury Account"), rows, "treasury_account"),
-		item=render_breakdown(_("By Item"), rows, "item"),
+		mode_of_payment=render_breakdown(_("حسب طريقة السداد"), rows, "mode_of_payment"),
+		treasury_account=render_breakdown(_("حسب الخزنة / الحساب"), rows, "treasury_account"),
+		item=render_breakdown(_("حسب الصنف"), rows, "item"),
 	)
 
 
@@ -290,7 +298,7 @@ def get_breakdown_rows(filters):
 def render_breakdown(title, rows, fieldname):
 	totals = defaultdict(float)
 	for row in rows:
-		totals[row.get(fieldname) or _("Not Set")] += flt(row.amount)
+		totals[row.get(fieldname) or _("غير محدد")] += flt(row.amount)
 
 	lines = "".join(
 		f"<tr><td>{frappe.utils.escape_html(label)}</td><td class='text-right'>{amount:,.2f}</td></tr>"
@@ -316,20 +324,22 @@ def get_print_html(filters=None):
 	summary_rows = get_summary_data(filters) if filters.view_type == "Summary View" else []
 	amount_columns = get_print_amount_columns(detailed_rows)
 	currency = get_company_currency(filters.company)
+	totals = get_print_totals(detailed_rows, amount_columns)
 
 	context = {
 		"filters": filters,
 		"filter_rows": get_print_filter_rows(filters),
 		"company": filters.company,
 		"company_tax_id": frappe.db.get_value("Company", filters.company, "tax_id"),
-		"currency": currency,
+		"currency": get_currency_label(currency),
 		"printed_on": format_date(now_datetime().date()),
 		"view_type_label": get_view_type_label(filters.view_type),
 		"amount_columns": amount_columns,
 		"detailed_rows": get_detailed_print_rows(detailed_rows, amount_columns),
 		"summary_rows": get_summary_print_rows(summary_rows, amount_columns),
-		"totals": get_print_totals(detailed_rows, amount_columns),
-		"format_amount": lambda amount: fmt_money(flt(amount), currency=currency, precision=2),
+		"totals": totals,
+		"total_in_words": egyptian_money_in_words(totals.total_received),
+		"format_amount": format_egyptian_money,
 	}
 
 	template_path = frappe.get_app_path(
@@ -358,6 +368,12 @@ def get_company_currency(company):
 	return frappe.get_cached_value("Company", company, "default_currency")
 
 
+def get_currency_label(currency):
+	if currency == "EGP":
+		return _("جنيه مصري")
+	return currency
+
+
 def get_print_amount_columns(rows):
 	labels = []
 	seen = set()
@@ -371,7 +387,7 @@ def get_print_amount_columns(rows):
 
 
 def get_amount_column_label(row):
-	return row.get("item_name") or row.get("item") or _("Not Set")
+	return row.get("item_name") or row.get("item") or _("غير محدد")
 
 
 def get_detailed_print_rows(rows, amount_columns):
@@ -416,7 +432,7 @@ def get_detailed_print_rows(rows, amount_columns):
 def get_summary_print_rows(rows, amount_columns):
 	print_rows = []
 	for index, row in enumerate(rows, start=1):
-		label = row.get("item_name") or row.get("item") or _("Not Set")
+		label = row.get("item_name") or row.get("item") or _("غير محدد")
 		amount = flt(row.amount)
 		print_rows.append(
 			frappe._dict(
@@ -444,8 +460,8 @@ def get_print_totals(rows, amount_columns):
 		amount = flt(row.amount)
 		label = get_amount_column_label(row)
 		amount_by_column[label] += amount
-		by_treasury_account[row.get("treasury_account") or _("Not Set")] += amount
-		by_mode_of_payment[row.get("mode_of_payment") or _("Not Set")] += amount
+		by_treasury_account[row.get("treasury_account") or _("غير محدد")] += amount
+		by_mode_of_payment[row.get("mode_of_payment") or _("غير محدد")] += amount
 		total_received += amount
 
 	return frappe._dict(
@@ -467,15 +483,15 @@ def sort_totals(totals):
 
 def get_print_filter_rows(filters):
 	filter_labels = {
-		"company": _("Company"),
-		"from_date": _("From Date"),
-		"to_date": _("To Date"),
-		"view_type": _("View Type"),
-		"customer": _("Customer"),
-		"item": _("Item"),
-		"item_group": _("Item Group"),
-		"mode_of_payment": _("Mode of Payment"),
-		"treasury_account": _("Treasury Account"),
+		"company": _("الشركة"),
+		"from_date": _("من تاريخ"),
+		"to_date": _("إلى تاريخ"),
+		"view_type": _("نوع العرض"),
+		"customer": _("العميل"),
+		"item": _("الصنف"),
+		"item_group": _("مجموعة الصنف"),
+		"mode_of_payment": _("طريقة السداد"),
+		"treasury_account": _("الخزنة / الحساب"),
 	}
 	rows = []
 	for fieldname, label in filter_labels.items():
@@ -494,5 +510,5 @@ def get_print_filter_rows(filters):
 
 def get_view_type_label(view_type):
 	if view_type == "Summary View":
-		return _("Summary View")
-	return _("Detailed View")
+		return _("عرض ملخص")
+	return _("عرض تفصيلي")

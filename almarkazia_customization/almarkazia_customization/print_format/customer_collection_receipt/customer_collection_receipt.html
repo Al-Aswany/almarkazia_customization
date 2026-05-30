@@ -11,6 +11,7 @@
 {% endif %}
 
 {% set currency = doc.paid_to_account_currency or doc.company_currency %}
+{% set received_amount = doc.received_amount or doc.paid_amount or doc.base_received_amount or 0 %}
 {% set invoice_items = frappe.db.sql("""
 	SELECT
 		si.name AS sales_invoice,
@@ -138,7 +139,7 @@
 		<div class="receipt-field"><span class="receipt-label">التاريخ:</span> {{ frappe.utils.format_date(doc.posting_date) }}</div>
 		<div class="receipt-field"><span class="receipt-label">العميل:</span> {{ doc.party_name or doc.party }}</div>
 		<div class="receipt-field"><span class="receipt-label">استلمنا من:</span> {{ doc.party_name or doc.party }}</div>
-		<div class="receipt-field"><span class="receipt-label">المبلغ:</span> {{ doc.get_formatted("received_amount", doc) }}</div>
+		<div class="receipt-field"><span class="receipt-label">المبلغ:</span> {{ format_egyptian_money(received_amount) }}</div>
 		<div class="receipt-field"><span class="receipt-label">طريقة السداد:</span> {{ doc.mode_of_payment or "" }}</div>
 		<div class="receipt-field"><span class="receipt-label">الخزنة / الحساب:</span> {{ doc.paid_to or "" }}</div>
 		<div class="receipt-field"><span class="receipt-label">المستلم:</span> {{ frappe.session.user }}</div>
@@ -148,13 +149,13 @@
 
 	<div class="receipt-block">
 		<span class="receipt-label">المبلغ كتابة:</span>
-		{{ doc.in_words or "" }}
+		{{ egyptian_money_in_words(received_amount) }}
 	</div>
 
 	<table class="receipt-table">
 		<thead>
 			<tr>
-				<th style="width: 40px;">#</th>
+				<th style="width: 40px;">م</th>
 				<th>فاتورة المبيعات</th>
 				<th>البند</th>
 				<th>مجموعة البند</th>
@@ -176,9 +177,9 @@
 				<td>{{ row.item_group or "" }}</td>
 				<td>{{ row.description or "" }}</td>
 				<td class="text-left">{{ frappe.format(row.qty, {"fieldtype": "Float"}) }}</td>
-				<td class="text-left">{{ frappe.utils.fmt_money(row.rate or 0, currency=currency) }}</td>
-				<td class="text-left">{{ frappe.utils.fmt_money(row.invoice_item_amount or 0, currency=currency) }}</td>
-				<td class="text-left">{{ frappe.utils.fmt_money(row.collected_amount or 0, currency=currency) }}</td>
+				<td class="text-left">{{ format_egyptian_money(row.rate or 0) }}</td>
+				<td class="text-left">{{ format_egyptian_money(row.invoice_item_amount or 0) }}</td>
+				<td class="text-left">{{ format_egyptian_money(row.collected_amount or 0) }}</td>
 			</tr>
 			{% endfor %}
 			{% if not invoice_items %}
@@ -190,8 +191,8 @@
 		<tfoot>
 			<tr>
 				<th colspan="7" class="text-left">الإجمالي</th>
-				<th class="text-left">{{ frappe.utils.fmt_money(totals.invoice, currency=currency) }}</th>
-				<th class="text-left">{{ frappe.utils.fmt_money(totals.collected, currency=currency) }}</th>
+				<th class="text-left">{{ format_egyptian_money(totals.invoice) }}</th>
+				<th class="text-left">{{ format_egyptian_money(totals.collected) }}</th>
 			</tr>
 		</tfoot>
 	</table>

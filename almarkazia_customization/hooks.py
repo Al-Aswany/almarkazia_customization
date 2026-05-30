@@ -5,6 +5,13 @@ app_description = "app for Almarkazia Customization"
 app_email = "mahmudhussain2001ab@gmail.com"
 app_license = "mit"
 
+jinja = {
+	"methods": [
+		"almarkazia_customization.utils.egyptian_money_in_words",
+		"almarkazia_customization.utils.format_egyptian_money",
+	],
+}
+
 fixtures = [
 	{
 		"dt": "Report",
