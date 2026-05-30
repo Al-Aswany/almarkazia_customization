@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+
+<head>
+	<meta charset="utf-8">
+	<title>حافظة إيداع نقدية </title>
+	<style>
+		@page {
+			size: A4 landscape;
+			margin: 8mm 7mm;
+		}
+
+		* {
+			box-sizing: border-box;
+		}
+
+		body {
+			margin: 0;
+			background: #fff;
+			color: #111;
+			direction: rtl;
+			font-family: "Cairo", "Tajawal", "Arial", sans-serif;
+			font-size: 9px;
+			line-height: 1.25;
+		}
+
+		.print-actions {
+			direction: ltr;
+			padding: 8px 0;
+		}
+
+		.print-actions button {
+			border: 1px solid #111;
+			background: #111;
+			color: #fff;
+			padding: 6px 12px;
+			font-size: 12px;
+			cursor: pointer;
+		}
+
+		.header {
+			display: grid;
+			grid-template-columns: 1fr 2fr 1fr;
+			align-items: center;
+			gap: 8px;
+			margin-bottom: 6px;
+		}
+
+		.box {
+			border: 1px solid #111;
+			padding: 4px 6px;
+			min-height: 32px;
+		}
+
+		.company {
+			font-weight: 700;
+			font-size: 11px;
+		}
+
+		.title {
+			text-align: center;
+			font-weight: 700;
+			font-size: 16px;
+		}
+
+		.period {
+			margin-top: 3px;
+			font-size: 10px;
+		}
+
+		.filters {
+			display: grid;
+			grid-template-columns: repeat(4, 1fr);
+			border-top: 1px solid #111;
+			border-right: 1px solid #111;
+			margin-bottom: 6px;
+		}
+
+		.filter {
+			border-left: 1px solid #111;
+			border-bottom: 1px solid #111;
+			padding: 2px 4px;
+			min-height: 17px;
+			white-space: nowrap;
+			overflow: hidden;
+			text-overflow: ellipsis;
+		}
+
+		.filter b {
+			margin-left: 3px;
+		}
+
+		table {
+			width: 100%;
+			border-collapse: collapse;
+			table-layout: fixed;
+		}
+
+		thead {
+			display: table-header-group;
+		}
+
+		tr {
+			break-inside: avoid;
+			page-break-inside: avoid;
+		}
+
+		th,
+		td {
+			border: 1px solid #111;
+			padding: 2px 3px;
+			vertical-align: middle;
+			text-align: center;
+			word-break: break-word;
+			overflow-wrap: anywhere;
+		}
+
+		th {
+			background: #e8e8e8;
+			font-weight: 700;
+		}
+
+		.name-cell {
+			text-align: right;
+		}
+
+		.amount-cell {
+			direction: ltr;
+			font-variant-numeric: tabular-nums;
+			white-space: nowrap;
+		}
+
+		.total-row th,
+		.total-row td {
+			background: #f3f3f3;
+			font-weight: 700;
+			border-top: 2px solid #111;
+		}
+
+		.empty-state {
+			border: 1px solid #111;
+			padding: 18px;
+			text-align: center;
+			font-size: 12px;
+		}
+
+		.signatures {
+			display: grid;
+			grid-template-columns: repeat(3, 1fr);
+			gap: 28px;
+			margin-top: 22px;
+			font-size: 10px;
+			text-align: center;
+		}
+
+		.signature {
+			border-top: 1px solid #111;
+			padding-top: 5px;
+		}
+
+		@media print {
+			.print-actions {
+				display: none;
+			}
+
+			body {
+				-webkit-print-color-adjust: exact;
+				print-color-adjust: exact;
+			}
+		}
+	</style>
+</head>
+
+<body>
+	<div class="print-actions"><button onclick="window.print()">Print</button></div>
+
+	<header class="header">
+		<div class="box">
+			<div class="company">{{ company }}</div>
+			{% if company_tax_id %}<div>الرقم الضريبي: {{ company_tax_id }}</div>{% endif %}
+		</div>
+		<div class="title">
+			حافظة إيداع نقدية
+			<div class="period">من {{ filters.from_date }} إلى {{ filters.to_date }}</div>
+		</div>
+		<div class="box">
+			<div><b>تاريخ الطباعة:</b> {{ printed_on }}</div>
+			<div><b>العملة:</b> {{ currency or "" }}</div>
+		</div>
+	</header>
+
+	<section class="filters">
+		{% for row in filter_rows %}
+		{% if row.label in ("Company", "From Date", "To Date", "View Type", "Customer", "Item", "Item Group", "Mode of
+		Payment", "Treasury Account", "Collector", "Branch") %}
+		<div class="filter"><b>{{ row.label }}:</b>{{ row.value }}</div>
+		{% endif %}
+		{% endfor %}
+	</section>
+
+	{% if filters.view_type == "Summary View" %}
+	<table>
+		<thead>
+			<tr>
+				{% if amount_columns %}
+				{% for column in amount_columns %}<th>{{ column.label }}</th>{% endfor %}
+				{% else %}
+				<th>المبلغ</th>
+				{% endif %}
+				<th style="width: 80px;">الإجمالي</th>
+			</tr>
+		</thead>
+		<tbody>
+			<tr class="total-row">
+				{% if amount_columns %}
+				{% for column in amount_columns %}<td class="amount-cell">{{
+					format_amount(totals.amount_by_column[column.key]) }}</td>{% endfor %}
+				{% else %}
+				<td></td>
+				{% endif %}
+				<td class="amount-cell">{{ format_amount(totals.total_received) }}</td>
+			</tr>
+		</tbody>
+	</table>
+	{% else %}
+	{% if detailed_rows %}
+	<table>
+		<thead>
+			<tr>
+				<th style="width: 28px;">م</th>
+				<th style="width: 58px;">التاريخ</th>
+				<th style="width: 82px;">رقم الإيصال</th>
+				<th style="width: 135px;">العميل</th>
+				{% if amount_columns %}
+				{% for column in amount_columns %}<th>{{ column.label }}</th>{% endfor %}
+				{% else %}
+				<th>المبلغ</th>
+				{% endif %}
+				<th style="width: 82px;">الإجمالي</th>
+			</tr>
+		</thead>
+		<tbody>
+			{% for row in detailed_rows %}
+			<tr>
+				<td>{{ row.serial }}</td>
+				<td>{{ row.posting_date }}</td>
+				<td>{{ row.manual_receipt_no or row.payment_entry }}</td>
+				<td class="name-cell">{{ row.customer }}</td>
+				{% if amount_columns %}
+				{% for column in amount_columns %}<td class="amount-cell">{{ format_amount(row.amount_cells[column.key])
+					if row.amount_cells[column.key] else "" }}</td>{% endfor %}
+				{% else %}
+				<td></td>
+				{% endif %}
+				<td class="amount-cell">{{ format_amount(row.amount) }}</td>
+			</tr>
+			{% endfor %}
+		</tbody>
+		<tfoot>
+			<tr class="total-row">
+				<th colspan="4">الإجمالي</th>
+				{% if amount_columns %}
+				{% for column in amount_columns %}<td class="amount-cell">{{
+					format_amount(totals.amount_by_column[column.key]) }}</td>{% endfor %}
+				{% else %}
+				<td></td>
+				{% endif %}
+				<td class="amount-cell">{{ format_amount(totals.total_received) }}</td>
+			</tr>
+		</tfoot>
+	</table>
+	{% else %}
+	<div class="empty-state">لا توجد بيانات للطباعة حسب الفلاتر المحددة.</div>
+	{% endif %}
+	{% endif %}
+
+	<footer class="signatures">
+		<div class="signature">المحصل</div>
+		<div class="signature">أمين الخزينة</div>
+		<div class="signature">مدير الجمعية</div>
+	</footer>
+
+	<script>
+		window.addEventListener("load", () => setTimeout(() => window.print(), 350));
+	</script>
+</body>
+
+</html>

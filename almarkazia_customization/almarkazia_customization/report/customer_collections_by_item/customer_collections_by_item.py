@@ -1,8 +1,10 @@
 from collections import defaultdict
+import json
 
 import frappe
 from frappe import _
-from frappe.utils import flt
+from frappe.desk.query_report import get_report_doc
+from frappe.utils import flt, fmt_money, format_date, now_datetime
 
 
 def execute(filters=None):
@@ -99,14 +101,18 @@ def get_detailed_data(filters):
 	return frappe.db.sql(
 		f"""
 		SELECT
+			ci.idx AS item_row,
 			pe.name AS payment_entry,
 			pe.posting_date,
+			pe.custom_manual_receipt_no AS manual_receipt_no,
 			pe.party AS customer,
 			pe.party_name AS customer_name,
+			pe.custom_received_from_text AS received_from_text,
 			ci.item,
 			ci.item_name,
 			ci.item_group,
 			ci.description,
+			pe.custom_payment_for AS payment_for,
 			ci.amount,
 			pe.mode_of_payment,
 			pe.paid_to AS treasury_account,
@@ -114,7 +120,8 @@ def get_detailed_data(filters):
 			pe.custom_branch AS branch,
 			pe.reference_no,
 			pe.reference_date,
-			ci.notes
+			ci.notes,
+			pe.remarks
 		FROM `tabPayment Entry` pe
 		INNER JOIN `tabPayment Entry Collection Item` ci
 			ON ci.parent = pe.name
@@ -160,6 +167,10 @@ def get_conditions(filters):
 		"pe.company = %(company)s",
 		"pe.posting_date BETWEEN %(from_date)s AND %(to_date)s",
 	]
+
+	if frappe.db.has_column("Payment Entry", "custom_is_collection_receipt"):
+		conditions.append("pe.custom_is_collection_receipt = 1")
+
 	params = {
 		"company": filters.company,
 		"from_date": filters.from_date,
@@ -267,3 +278,203 @@ def render_breakdown(title, rows, fieldname):
 			<tbody>{lines}</tbody>
 		</table>
 	"""
+
+
+
+@frappe.whitelist()
+@frappe.read_only()
+def get_print_html(filters=None):
+	filters = parse_print_filters(filters)
+	get_report_doc("Customer Collections by Item")
+	validate_filters(filters)
+
+	detailed_rows = get_detailed_data(filters)
+	summary_rows = get_summary_data(filters) if filters.view_type == "Summary View" else []
+	amount_columns = get_print_amount_columns(detailed_rows)
+	currency = get_company_currency(filters.company)
+
+	context = {
+		"filters": filters,
+		"filter_rows": get_print_filter_rows(filters),
+		"company": filters.company,
+		"company_tax_id": frappe.db.get_value("Company", filters.company, "tax_id"),
+		"currency": currency,
+		"printed_on": format_date(now_datetime().date()),
+		"view_type_label": get_view_type_label(filters.view_type),
+		"amount_columns": amount_columns,
+		"detailed_rows": get_detailed_print_rows(detailed_rows, amount_columns),
+		"summary_rows": get_summary_print_rows(summary_rows, amount_columns),
+		"totals": get_print_totals(detailed_rows, amount_columns),
+		"format_amount": lambda amount: fmt_money(flt(amount), currency=currency, precision=2),
+	}
+
+	template_path = frappe.get_app_path(
+		"almarkazia_customization",
+		"templates",
+		"includes",
+		"customer_collections_by_item_print.html",
+	)
+	with open(template_path) as template:
+		html = frappe.render_template(template.read(), context)
+
+	frappe.local.response.filename = "customer_collections_by_item.html"
+	frappe.local.response.filecontent = html
+	frappe.local.response.type = "download"
+	frappe.local.response.display_content_as = "inline"
+	frappe.local.response.content_type = "text/html; charset=utf-8"
+
+
+def parse_print_filters(filters):
+	if isinstance(filters, str):
+		filters = json.loads(filters or "{}")
+	return frappe._dict(filters or {})
+
+
+def get_company_currency(company):
+	return frappe.get_cached_value("Company", company, "default_currency")
+
+
+def get_print_amount_columns(rows):
+	labels = []
+	seen = set()
+	for row in rows:
+		label = get_amount_column_label(row)
+		if label not in seen:
+			labels.append(label)
+			seen.add(label)
+
+	return [frappe._dict({"key": label, "label": label}) for label in labels]
+
+
+def get_amount_column_label(row):
+	return row.get("item_name") or row.get("item") or _("Not Set")
+
+
+def get_detailed_print_rows(rows, amount_columns):
+	print_rows = []
+	entries = {}
+
+	for row in rows:
+		entry = entries.setdefault(
+			row.payment_entry,
+			frappe._dict(
+				{
+					"posting_date": format_date(row.posting_date),
+					"payment_entry": row.payment_entry,
+					"manual_receipt_no": row.manual_receipt_no or "",
+					"customer": row.customer_name or row.customer or "",
+					"received_from_text": row.received_from_text or "",
+					"description_parts": [],
+					"payment_for": row.payment_for or "",
+					"mode_of_payment": row.mode_of_payment or "",
+					"treasury_account": row.treasury_account or "",
+					"amount_cells": {column.key: 0 for column in amount_columns},
+					"amount": 0,
+					"collector": row.collector or "",
+					"remarks": row.notes or row.remarks or "",
+				}
+			),
+		)
+
+		label = get_amount_column_label(row)
+		amount = flt(row.amount)
+		entry.amount_cells[label] = flt(entry.amount_cells.get(label)) + amount
+		entry.amount += amount
+
+		description = row.description or row.item_name or row.item
+		if description and description not in entry.description_parts:
+			entry.description_parts.append(description)
+
+	for index, entry in enumerate(entries.values(), start=1):
+		entry.serial = index
+		entry.description = entry.payment_for or " / ".join(entry.description_parts)
+		print_rows.append(entry)
+
+	return print_rows
+
+
+def get_summary_print_rows(rows, amount_columns):
+	print_rows = []
+	for index, row in enumerate(rows, start=1):
+		label = row.get("item_name") or row.get("item") or _("Not Set")
+		amount = flt(row.amount)
+		print_rows.append(
+			frappe._dict(
+				{
+					"serial": index,
+					"item": row.item or "",
+					"item_name": row.item_name or "",
+					"item_group": row.item_group or "",
+					"entry_count": row.entry_count or 0,
+					"amount_cells": {column.key: amount if column.key == label else 0 for column in amount_columns},
+					"amount": amount,
+				}
+			)
+		)
+	return print_rows
+
+
+def get_print_totals(rows, amount_columns):
+	amount_by_column = {column.key: 0 for column in amount_columns}
+	by_treasury_account = defaultdict(float)
+	by_mode_of_payment = defaultdict(float)
+	total_received = 0
+
+	for row in rows:
+		amount = flt(row.amount)
+		label = get_amount_column_label(row)
+		amount_by_column[label] += amount
+		by_treasury_account[row.get("treasury_account") or _("Not Set")] += amount
+		by_mode_of_payment[row.get("mode_of_payment") or _("Not Set")] += amount
+		total_received += amount
+
+	return frappe._dict(
+		{
+			"amount_by_column": amount_by_column,
+			"by_treasury_account": sort_totals(by_treasury_account),
+			"by_mode_of_payment": sort_totals(by_mode_of_payment),
+			"total_received": total_received,
+		}
+	)
+
+
+def sort_totals(totals):
+	return [
+		frappe._dict({"label": label, "amount": amount})
+		for label, amount in sorted(totals.items(), key=lambda item: item[1], reverse=True)
+	]
+
+
+def get_print_filter_rows(filters):
+	filter_labels = {
+		"company": _("Company"),
+		"from_date": _("From Date"),
+		"to_date": _("To Date"),
+		"view_type": _("View Type"),
+		"customer": _("Customer"),
+		"item": _("Item"),
+		"item_group": _("Item Group"),
+		"mode_of_payment": _("Mode of Payment"),
+		"treasury_account": _("Treasury Account"),
+		"collector": _("Collector"),
+		"branch": _("Branch"),
+	}
+	rows = []
+	for fieldname, label in filter_labels.items():
+		value = filters.get(fieldname)
+		if not value:
+			continue
+
+		if fieldname in ("from_date", "to_date"):
+			value = format_date(value)
+		elif fieldname == "view_type":
+			value = get_view_type_label(value)
+
+		rows.append(frappe._dict({"label": label, "value": value}))
+	return rows
+
+
+def get_view_type_label(view_type):
+	if view_type == "Summary View":
+		return _("Summary View")
+	return _("Detailed View")

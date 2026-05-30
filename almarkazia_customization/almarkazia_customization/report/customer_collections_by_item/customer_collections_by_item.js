@@ -1,4 +1,21 @@
 frappe.query_reports["Customer Collections by Item"] = {
+	onload(report) {
+		report.page.add_inner_button(__("طباعة التقرير"), () => {
+			let filters;
+			try {
+				filters = report.get_filter_values(true);
+			} catch (e) {
+				return;
+			}
+
+			const url = frappe.urllib.get_full_url(
+				"/api/method/almarkazia_customization.almarkazia_customization.report.customer_collections_by_item.customer_collections_by_item.get_print_html" +
+					"?filters=" +
+					encodeURIComponent(JSON.stringify(filters))
+			);
+			window.open(url, "_blank");
+		});
+	},
 	filters: [
 		{
 			fieldname: "company",

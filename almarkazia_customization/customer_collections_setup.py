@@ -13,10 +13,18 @@ def create_payment_entry_collection_fields():
 	custom_fields = {
 		"Payment Entry": [
 			{
+				"fieldname": "custom_is_collection_receipt",
+				"label": "Is Collection Receipt",
+				"fieldtype": "Check",
+				"insert_after": "received_amount",
+				"depends_on": CUSTOMER_COLLECTION_DEPENDS_ON,
+				"default": "1",
+			},
+			{
 				"fieldname": "custom_manual_receipt_no",
 				"label": "Manual Receipt No",
 				"fieldtype": "Data",
-				"insert_after": "received_amount",
+				"insert_after": "custom_is_collection_receipt",
 				"depends_on": CUSTOMER_COLLECTION_DEPENDS_ON,
 			},
 			{

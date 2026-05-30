@@ -13,6 +13,7 @@ fixtures = [
 				"name",
 				"in",
 				[
+					"Payment Entry-custom_is_collection_receipt",
 					"Payment Entry-custom_manual_receipt_no",
 					"Payment Entry-custom_received_from_text",
 					"Payment Entry-custom_payment_for",

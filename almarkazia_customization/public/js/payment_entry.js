@@ -1,4 +1,5 @@
 const CUSTOMER_COLLECTION_FIELDS = [
+	"custom_is_collection_receipt",
 	"custom_manual_receipt_no",
 	"custom_received_from_text",
 	"custom_payment_for",
